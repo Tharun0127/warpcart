@@ -26,6 +26,11 @@ def product_key(product_id: int) -> str:
     return _key("product", product_id)
 
 
+def lock_key(cache_key: str) -> str:
+    """Lock guarding the rebuild of one cache key (stampede protection)."""
+    return f"{cache_key}:lock"
+
+
 def categories_key() -> str:
     return _key("categories")
 

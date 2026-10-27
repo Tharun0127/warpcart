@@ -1,0 +1,15 @@
+Stampede benchmark: hot key deleted, then 500 concurrent GET /products/1
+against the API (4 uvicorn workers). DB queries counted with pg_stat_statements.
+
+strategy=lock requests=500 wall_time=1.71s
+http_status={200: 500} x_cache={'MISS': 1, 'HIT': 499}
+DB_DETAIL_QUERIES=1
+
+strategy=none requests=500 wall_time=5.62s
+http_status={200: 500} x_cache={'MISS': 32, 'HIT': 468}
+DB_DETAIL_QUERIES=32
+
+strategy=xfetch requests=500 wall_time=6.64s
+http_status={200: 500} x_cache={'MISS': 79, 'HIT': 421}
+DB_DETAIL_QUERIES=79
+(xfetch refreshes BEFORE expiry; it cannot help when the key is already gone)

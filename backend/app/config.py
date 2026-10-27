@@ -4,6 +4,7 @@ Keeping every knob in one place makes it easy to see what can be tuned
 (for example turning the cache off for a benchmark run).
 """
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -31,6 +32,20 @@ class Settings(BaseSettings):
     ttl_not_found_seconds: int = 30
     # +/-10% random jitter so keys written together do not all expire together.
     ttl_jitter_ratio: float = 0.1
+
+    # Stampede protection: "lock" (SET NX PX), "xfetch" (probabilistic early
+    # expiration) or "none". See app/cache/aside.py and docs/DECISIONS.md.
+    stampede_strategy: Literal["lock", "xfetch", "none"] = "lock"
+    # Must be longer than the slowest loader, or two requests could rebuild.
+    stampede_lock_ttl_ms: int = 3000
+    stampede_retry_ms: int = 20
+    stampede_max_wait_ms: int = 2000
+    # beta > 1 refreshes earlier, beta < 1 later. 1.0 is the paper's default.
+    xfetch_beta: float = 1.0
+
+    # Graceful degradation: give up on Redis quickly, then skip it for a while.
+    redis_timeout_seconds: float = 0.25
+    redis_retry_after_seconds: float = 5.0
 
     # Connection pool per worker process
     db_pool_size: int = 10

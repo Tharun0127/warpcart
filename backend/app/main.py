@@ -3,7 +3,6 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from redis.asyncio import Redis
 
 from app.cache.aside import CacheAside
 from app.cache.store import CacheStore
@@ -22,7 +21,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         engine = build_engine(settings)
         session_factory = build_session_factory(engine)
-        store = CacheStore(Redis.from_url(settings.redis_url, decode_responses=True))
+        store = CacheStore.from_url(
+            settings.redis_url, settings.redis_timeout_seconds, settings.redis_retry_after_seconds
+        )
 
         app.state.settings = settings
         app.state.store = store

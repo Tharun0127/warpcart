@@ -96,6 +96,34 @@ A search with no category filter can contain a product from any category. Bumpin
 - A search reads its version **before** querying Postgres. If an update lands mid-query, the reader writes under the old version, which is already unreachable. So the classic "stale write after invalidation" race cannot poison search keys.
 - The product detail key still has that race in theory (reader loads old row → admin commits and deletes → reader writes old row). The window is a few milliseconds and the 300 s TTL bounds the damage. A fix would be a delayed second delete or a per-product version; we documented it instead of adding complexity (see INTERVIEW.md).
 
+## Stampede protection
+
+### Default: Redis lock (`SET key token NX PX 3000`) with wait-and-retry
+- **How it works:** on a miss, every request tries to take `<key>:lock`. Exactly one wins and queries Postgres. The others poll the cache every 20 ms for up to 2 s. If the value appears, they return it as a HIT. If the holder is too slow or crashed, they load from Postgres themselves (without caching) so no user waits forever.
+- **Why a random token + Lua compare-and-delete to release:** if a lock expires (PX) while its holder is still working and another request takes it, a plain `DEL` from the first holder would delete the second holder's lock.
+- **Why PX (auto-expiry):** a crashed worker can never hold the lock forever.
+- **Why Redis and not an in-process `asyncio.Lock`:** the API runs 4 worker processes; an in-process lock only de-duplicates inside one process (we would get up to 4 queries, not 1).
+- **Measured:** 500 concurrent requests on an expired hot key → 1 DB query (none: 32, see BENCHMARKS.md).
+- **Alternatives:** Redlock (multi-node) is unnecessary with one Redis; request coalescing in-process only (see above).
+
+### Second option: probabilistic early expiration (XFetch), `STAMPEDE_STRATEGY=xfetch`
+- Each cached entry stores `expires_at` and `compute_seconds` (how long the loader took). On each read, a request refreshes early if `now - compute_seconds * beta * ln(rand) >= expires_at`. Far from expiry this is practically never true; close to expiry one request tends to refresh it while the others keep getting HITs.
+- **Strength:** no locks, no waiting, the hot key never actually expires.
+- **Weakness:** it does nothing for a key that is already missing (cold start, eviction, invalidation). The benchmark shows exactly that: 79 queries when we delete the key. That is why the lock is the default.
+- `beta` is configurable (`XFETCH_BETA`, default 1.0 as in the paper).
+
+### TTL jitter is a third, passive layer
+Covered under "TTL strategy": it prevents many different keys expiring together, which the two strategies above do not address.
+
+## Graceful degradation
+
+### Redis errors become "go to Postgres", never a 500
+- **Chosen:** `CacheStore` converts every Redis error into `CacheUnavailable`; `CacheAside` catches it and calls the loader directly. Response header `X-Cache: DEGRADED`. A warning is logged.
+- **Short timeouts (250 ms):** a cache that takes seconds to answer is worse than no cache.
+- **Tiny circuit breaker:** after one failure, Redis is skipped for 5 s. Without it, every request would pay the connection timeout while Redis is down. Logs one warning when it goes down and one when it recovers, not one per request.
+- **Writes when Redis is down:** the Postgres update still succeeds and returns 200. Invalidation is skipped with a warning. Since Redis runs without persistence, a restarted Redis is empty anyway; in a network partition, stale entries are bounded by their TTL.
+- **Risk we accept:** when Redis is down, all traffic hits Postgres. The baseline benchmark shows Postgres alone handles the load (with higher latency). In production you would add rate limiting or a connection-pool cap; out of scope here.
+
 ### Redis configuration: no persistence, `volatile-lru`, 256 MB
 - **Why:** it is a cache; losing it on restart is fine, and persistence costs I/O. `volatile-lru` only evicts keys with a TTL, so cache entries get evicted under memory pressure but TTL-less bookkeeping keys (like search version counters) never are.
 
