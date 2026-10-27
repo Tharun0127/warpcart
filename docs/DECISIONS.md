@@ -89,7 +89,15 @@ All TTLs get **±10% random jitter** so keys written together in a burst do not 
 - **Cost:** one extra Redis `GET` per search to read the version. Cheap (sub-millisecond) compared to a search query.
 
 ### Why searches without a category get their own "all" scope
-A search with no category filter can contain a product from any category. Bumping the "all" scope on every update keeps those correct. The trade-off is that "all" searches are invalidated more often than category searches; under the benchmark's 5% write rate this is acceptable and is visible in the hit ratio.
+A search with no category filter can contain a product from any category. Bumping the "all" scope on every update keeps those correct. The trade-off is that "all" searches are invalidated more often than category searches.
+
+### Measured consequence: search hit ratio vs write rate
+Under the benchmark's 5% writes (~60 updates/s across hot products in every category), search hit ratio was 14%; with writes off it was 95%. Invalidation is correct but too fine-grained for that write rate. We kept the precise design because a real catalog changes far fewer prices per second, and documented the alternative: for write-heavy catalogs, invalidate search only by TTL (bounded staleness) or version by coarser buckets. See BENCHMARKS.md.
+
+### Benchmark methodology
+- Every run starts with an empty Redis (warm-up misses included), same build, only `CACHE_ENABLED` differs.
+- One Locust process inside the API container. Four processes lowered API throughput (CPU contention), so they were not used.
+- Absolute numbers vary between sessions on a laptop; only back-to-back runs are compared.
 
 ### Invalidate after commit, and read the version before loading
 - Invalidating before the transaction commits would let a concurrent reader re-cache the old row.

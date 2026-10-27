@@ -16,7 +16,7 @@ Run headless inside the api container, e.g.:
 import itertools
 import random
 
-from locust import FastHttpUser, constant, task
+from locust import FastHttpUser, constant, tag, task
 
 HOT_PRODUCT_COUNT = 1000
 HOT_PRODUCT_IDS = list(range(1, HOT_PRODUCT_COUNT + 1))
@@ -57,6 +57,7 @@ class Shopper(FastHttpUser):
         params["page"] = random.choice(PAGES)
         self.client.get("/products", params=params, name="/products?search")
 
+    @tag("write")  # --exclude-tags write gives a read-only run
     @task(5)
     def admin_update(self) -> None:
         body = {"price": f"{random.uniform(5, 500):.2f}", "stock": random.randint(0, 500)}
