@@ -1,0 +1,127 @@
+=== Q1: keyword search, selective phrase (name ILIKE %green sneakers%) ===
+                                                   QUERY PLAN                                                   
+----------------------------------------------------------------------------------------------------------------
+ Limit (actual time=10.784..10.804 rows=21 loops=1)
+   Buffers: shared hit=598
+   ->  Sort (actual time=10.782..10.798 rows=21 loops=1)
+         Sort Key: p.id
+         Sort Method: top-N heapsort  Memory: 27kB
+         Buffers: shared hit=598
+         ->  Hash Join (actual time=8.643..10.666 rows=356 loops=1)
+               Hash Cond: (p.category_id = c.id)
+               Buffers: shared hit=595
+               ->  Bitmap Heap Scan on products p (actual time=8.594..10.503 rows=356 loops=1)
+                     Recheck Cond: ((name)::text ~~* '%green sneakers%'::text)
+                     Rows Removed by Index Recheck: 17
+                     Heap Blocks: exact=368
+                     Buffers: shared hit=594
+                     ->  Bitmap Index Scan on ix_products_name_trgm (actual time=8.498..8.499 rows=373 loops=1)
+                           Index Cond: ((name)::text ~~* '%green sneakers%'::text)
+                           Buffers: shared hit=226
+               ->  Hash (actual time=0.022..0.026 rows=30 loops=1)
+                     Buckets: 1024  Batches: 1  Memory Usage: 10kB
+                     Buffers: shared hit=1
+                     ->  Seq Scan on categories c (actual time=0.008..0.012 rows=30 loops=1)
+                           Buffers: shared hit=1
+ Planning:
+   Buffers: shared hit=291
+ Planning Time: 2.403 ms
+ Execution Time: 11.589 ms
+(26 rows)
+
+=== Q2: category + selective price range (cameras, 2000..2100) ===
+                                                         QUERY PLAN                                                         
+----------------------------------------------------------------------------------------------------------------------------
+ Limit (actual time=1.459..1.465 rows=21 loops=1)
+   Buffers: shared hit=350 read=4
+   ->  Sort (actual time=1.458..1.460 rows=21 loops=1)
+         Sort Key: p.id
+         Sort Method: top-N heapsort  Memory: 27kB
+         Buffers: shared hit=350 read=4
+         ->  Nested Loop (actual time=0.224..1.344 rows=352 loops=1)
+               Buffers: shared hit=350 read=4
+               ->  Index Scan using categories_slug_key on categories c (actual time=0.014..0.017 rows=1 loops=1)
+                     Index Cond: ((slug)::text = 'cameras'::text)
+                     Buffers: shared hit=2
+               ->  Bitmap Heap Scan on products p (actual time=0.204..1.255 rows=352 loops=1)
+                     Recheck Cond: ((category_id = c.id) AND (price >= '2000'::numeric) AND (price <= '2100'::numeric))
+                     Heap Blocks: exact=348
+                     Buffers: shared hit=348 read=4
+                     ->  Bitmap Index Scan on ix_products_category_price (actual time=0.170..0.170 rows=352 loops=1)
+                           Index Cond: ((category_id = c.id) AND (price >= '2000'::numeric) AND (price <= '2100'::numeric))
+                           Buffers: shared read=4
+ Planning:
+   Buffers: shared hit=18 read=3
+ Planning Time: 0.503 ms
+ Execution Time: 1.538 ms
+(22 rows)
+
+=== Q3: rare price range only (2400..2500), no category ===
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+ Limit (actual time=0.075..3.375 rows=21 loops=1)
+   Buffers: shared hit=772
+   ->  Nested Loop (actual time=0.074..3.370 rows=21 loops=1)
+         Buffers: shared hit=772
+         ->  Index Scan using products_pkey on products p (actual time=0.058..3.306 rows=21 loops=1)
+               Filter: ((price >= '2400'::numeric) AND (price <= '2500'::numeric))
+               Rows Removed by Filter: 19203
+               Buffers: shared hit=730
+         ->  Index Scan using categories_pkey on categories c (actual time=0.002..0.002 rows=1 loops=21)
+               Index Cond: (id = p.category_id)
+               Buffers: shared hit=42
+ Planning:
+   Buffers: shared hit=8
+ Planning Time: 0.228 ms
+ Execution Time: 3.414 ms
+(15 rows)
+
+=== Q4: keyword + category + price (rugged, outdoors, 10..60) ===
+                                                                         QUERY PLAN                                                                         
+------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit (actual time=6.969..6.975 rows=21 loops=1)
+   Buffers: shared hit=215 read=17
+   ->  Sort (actual time=6.968..6.971 rows=21 loops=1)
+         Sort Key: p.id
+         Sort Method: top-N heapsort  Memory: 28kB
+         Buffers: shared hit=215 read=17
+         ->  Nested Loop (actual time=6.102..6.903 rows=170 loops=1)
+               Buffers: shared hit=215 read=17
+               ->  Index Scan using categories_slug_key on categories c (actual time=0.014..0.017 rows=1 loops=1)
+                     Index Cond: ((slug)::text = 'outdoors'::text)
+                     Buffers: shared hit=2
+               ->  Bitmap Heap Scan on products p (actual time=6.084..6.862 rows=170 loops=1)
+                     Recheck Cond: ((category_id = c.id) AND (price >= '10'::numeric) AND (price <= '60'::numeric) AND ((name)::text ~~* '%rugged%'::text))
+                     Heap Blocks: exact=167
+                     Buffers: shared hit=213 read=17
+                     ->  BitmapAnd (actual time=6.034..6.035 rows=0 loops=1)
+                           Buffers: shared hit=46 read=17
+                           ->  Bitmap Index Scan on ix_products_category_price (actual time=1.002..1.002 rows=3969 loops=1)
+                                 Index Cond: ((category_id = c.id) AND (price >= '10'::numeric) AND (price <= '60'::numeric))
+                                 Buffers: shared hit=1 read=17
+                           ->  Bitmap Index Scan on ix_products_name_trgm (actual time=4.817..4.817 rows=20699 loops=1)
+                                 Index Cond: ((name)::text ~~* '%rugged%'::text)
+                                 Buffers: shared hit=45
+ Planning:
+   Buffers: shared hit=1
+ Planning Time: 0.313 ms
+ Execution Time: 7.126 ms
+(27 rows)
+
+=== Q5: product detail by primary key (id = 123456) ===
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Nested Loop (actual time=0.083..0.085 rows=1 loops=1)
+   Buffers: shared hit=6
+   ->  Index Scan using products_pkey on products p (actual time=0.054..0.055 rows=1 loops=1)
+         Index Cond: (id = 123456)
+         Buffers: shared hit=4
+   ->  Index Scan using categories_pkey on categories c (actual time=0.024..0.024 rows=1 loops=1)
+         Index Cond: (id = p.category_id)
+         Buffers: shared hit=2
+ Planning:
+   Buffers: shared hit=16
+ Planning Time: 0.507 ms
+ Execution Time: 0.140 ms
+(12 rows)
+

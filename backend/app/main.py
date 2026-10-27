@@ -5,6 +5,7 @@ from fastapi import FastAPI
 
 from app.config import Settings, get_settings
 from app.db import build_engine, build_session_factory
+from app.routers import admin, catalog
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -20,6 +21,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await engine.dispose()
 
     app = FastAPI(title="Warpcart", lifespan=lifespan)
+    app.include_router(catalog.router)
+    app.include_router(admin.router)
 
     @app.get("/health")
     async def health() -> dict:

@@ -7,3 +7,6 @@ dist/
 .env
 *.log
 backend/benchmarks/results/*.html
+backend/benchmarks/results/*_history.csv
+backend/benchmarks/results/*_failures.csv
+backend/benchmarks/results/*_exceptions.csv

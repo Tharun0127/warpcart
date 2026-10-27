@@ -1,0 +1,125 @@
+=== Q1: keyword search, selective phrase (name ILIKE %green sneakers%) ===
+                                                      QUERY PLAN                                                      
+----------------------------------------------------------------------------------------------------------------------
+ Limit (actual time=152.234..160.262 rows=21 loops=1)
+   Buffers: shared hit=17589
+   ->  Nested Loop (actual time=152.232..160.258 rows=21 loops=1)
+         Buffers: shared hit=17589
+         ->  Gather Merge (actual time=152.163..160.161 rows=21 loops=1)
+               Workers Planned: 2
+               Workers Launched: 2
+               Buffers: shared hit=17547
+               ->  Parallel Index Scan using products_pkey on products p (actual time=1.230..101.340 rows=99 loops=3)
+                     Filter: ((name)::text ~~* '%green sneakers%'::text)
+                     Rows Removed by Filter: 144719
+                     Buffers: shared hit=17547
+         ->  Index Scan using categories_pkey on categories c (actual time=0.004..0.004 rows=1 loops=21)
+               Index Cond: (id = p.category_id)
+               Buffers: shared hit=42
+ Planning:
+   Buffers: shared hit=213
+ Planning Time: 1.402 ms
+ Execution Time: 160.422 ms
+(19 rows)
+
+=== Q2: category + selective price range (cameras, 2000..2100) ===
+                                                          QUERY PLAN                                                          
+------------------------------------------------------------------------------------------------------------------------------
+ Limit (actual time=25.729..28.589 rows=21 loops=1)
+   Buffers: shared hit=16852
+   ->  Gather Merge (actual time=25.727..28.585 rows=21 loops=1)
+         Workers Planned: 2
+         Workers Launched: 2
+         Buffers: shared hit=16852
+         ->  Sort (actual time=22.061..22.064 rows=21 loops=3)
+               Sort Key: p.id
+               Sort Method: top-N heapsort  Memory: 27kB
+               Buffers: shared hit=16852
+               Worker 0:  Sort Method: top-N heapsort  Memory: 28kB
+               Worker 1:  Sort Method: top-N heapsort  Memory: 27kB
+               ->  Hash Join (actual time=0.386..21.950 rows=117 loops=3)
+                     Hash Cond: (p.category_id = c.id)
+                     Buffers: shared hit=16838
+                     ->  Parallel Seq Scan on products p (actual time=0.054..21.637 rows=239 loops=3)
+                           Filter: ((price >= '2000'::numeric) AND (price <= '2100'::numeric))
+                           Rows Removed by Filter: 166428
+                           Buffers: shared hit=16736
+                     ->  Hash (actual time=0.027..0.028 rows=1 loops=3)
+                           Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                           Buffers: shared hit=8
+                           ->  Index Scan using categories_slug_key on categories c (actual time=0.019..0.020 rows=1 loops=3)
+                                 Index Cond: ((slug)::text = 'cameras'::text)
+                                 Buffers: shared hit=8
+ Planning:
+   Buffers: shared hit=10
+ Planning Time: 0.448 ms
+ Execution Time: 28.698 ms
+(29 rows)
+
+=== Q3: rare price range only (2400..2500), no category ===
+                                               QUERY PLAN                                                
+---------------------------------------------------------------------------------------------------------
+ Limit (actual time=0.069..2.699 rows=21 loops=1)
+   Buffers: shared hit=772
+   ->  Nested Loop (actual time=0.068..2.696 rows=21 loops=1)
+         Buffers: shared hit=772
+         ->  Index Scan using products_pkey on products p (actual time=0.050..2.647 rows=21 loops=1)
+               Filter: ((price >= '2400'::numeric) AND (price <= '2500'::numeric))
+               Rows Removed by Filter: 19203
+               Buffers: shared hit=730
+         ->  Index Scan using categories_pkey on categories c (actual time=0.002..0.002 rows=1 loops=21)
+               Index Cond: (id = p.category_id)
+               Buffers: shared hit=42
+ Planning Time: 0.227 ms
+ Execution Time: 2.802 ms
+(13 rows)
+
+=== Q4: keyword + category + price (rugged, outdoors, 10..60) ===
+                                                            QUERY PLAN                                                             
+-----------------------------------------------------------------------------------------------------------------------------------
+ Limit (actual time=125.419..129.000 rows=21 loops=1)
+   Buffers: shared hit=16852
+   ->  Gather Merge (actual time=125.418..128.996 rows=21 loops=1)
+         Workers Planned: 2
+         Workers Launched: 2
+         Buffers: shared hit=16852
+         ->  Sort (actual time=122.348..122.352 rows=17 loops=3)
+               Sort Key: p.id
+               Sort Method: top-N heapsort  Memory: 28kB
+               Buffers: shared hit=16852
+               Worker 0:  Sort Method: top-N heapsort  Memory: 28kB
+               Worker 1:  Sort Method: top-N heapsort  Memory: 27kB
+               ->  Hash Join (actual time=1.253..122.194 rows=57 loops=3)
+                     Hash Cond: (p.category_id = c.id)
+                     Buffers: shared hit=16838
+                     ->  Parallel Seq Scan on products p (actual time=0.032..121.497 rows=2021 loops=3)
+                           Filter: (((name)::text ~~* '%rugged%'::text) AND (price >= '10'::numeric) AND (price <= '60'::numeric))
+                           Rows Removed by Filter: 164646
+                           Buffers: shared hit=16736
+                     ->  Hash (actual time=0.021..0.023 rows=1 loops=3)
+                           Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                           Buffers: shared hit=8
+                           ->  Index Scan using categories_slug_key on categories c (actual time=0.015..0.016 rows=1 loops=3)
+                                 Index Cond: ((slug)::text = 'outdoors'::text)
+                                 Buffers: shared hit=8
+ Planning Time: 0.236 ms
+ Execution Time: 129.100 ms
+(27 rows)
+
+=== Q5: product detail by primary key (id = 123456) ===
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Nested Loop (actual time=0.047..0.048 rows=1 loops=1)
+   Buffers: shared hit=6
+   ->  Index Scan using products_pkey on products p (actual time=0.027..0.028 rows=1 loops=1)
+         Index Cond: (id = 123456)
+         Buffers: shared hit=4
+   ->  Index Scan using categories_pkey on categories c (actual time=0.016..0.016 rows=1 loops=1)
+         Index Cond: (id = p.category_id)
+         Buffers: shared hit=2
+ Planning:
+   Buffers: shared hit=12
+ Planning Time: 0.268 ms
+ Execution Time: 0.080 ms
+(12 rows)
+
