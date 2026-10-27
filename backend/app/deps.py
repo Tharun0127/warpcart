@@ -1,17 +1,10 @@
 """FastAPI dependencies shared by routers."""
-from collections.abc import AsyncIterator
 from decimal import Decimal
 
-from fastapi import HTTPException, Query, Request
+from fastapi import HTTPException, Query
 from pydantic import ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas import SearchParams
-
-
-async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
-    async with request.app.state.session_factory() as session:
-        yield session
 
 
 def get_search_params(

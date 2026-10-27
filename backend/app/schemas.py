@@ -2,7 +2,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class CategoryOut(BaseModel):
@@ -37,6 +37,20 @@ class SearchParams(BaseModel):
     max_price: Decimal | None = Field(default=None, ge=0, max_digits=10, decimal_places=2)
     page: int = Field(default=1, ge=1, le=500)
     page_size: int = Field(default=20, ge=1, le=100)
+
+    @field_validator("q", "category")
+    @classmethod
+    def normalize_text(cls, value: str | None) -> str | None:
+        """Lower-case and collapse whitespace.
+
+        Search is case-insensitive (ILIKE), so "  Green   LAMP " and "green lamp"
+        mean the same thing. Normalising here means the SQL and the cache key
+        both see the same canonical value, so they produce one cache entry.
+        """
+        if value is None:
+            return None
+        cleaned = " ".join(value.lower().split())
+        return cleaned or None
 
     @model_validator(mode="after")
     def check_price_range(self) -> "SearchParams":

@@ -1,11 +1,18 @@
 """FastAPI application factory."""
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from redis.asyncio import Redis
 
+from app.cache.aside import CacheAside
+from app.cache.store import CacheStore
 from app.config import Settings, get_settings
 from app.db import build_engine, build_session_factory
 from app.routers import admin, catalog
+from app.services import CatalogService
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -14,10 +21,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         engine = build_engine(settings)
+        session_factory = build_session_factory(engine)
+        store = CacheStore(Redis.from_url(settings.redis_url, decode_responses=True))
+
         app.state.settings = settings
-        app.state.engine = engine
-        app.state.session_factory = build_session_factory(engine)
+        app.state.store = store
+        app.state.catalog = CatalogService(session_factory, CacheAside(store, settings), settings)
         yield
+        await store.close()
         await engine.dispose()
 
     app = FastAPI(title="Warpcart", lifespan=lifespan)

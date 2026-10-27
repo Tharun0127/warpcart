@@ -1,30 +1,44 @@
-"""Public read endpoints: categories, search, product detail."""
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
+"""Public read endpoints: categories, search, product detail.
 
-from app import repository
-from app.deps import get_search_params, get_session
+Every response carries an `X-Cache` header (HIT, MISS or BYPASS) so you can
+watch the cache work from curl or the browser dev tools.
+"""
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
+
+from app.cache.aside import CacheResult
+from app.deps import get_search_params
 from app.schemas import CategoryOut, ProductDetail, SearchParams, SearchResponse
+from app.services import CatalogService
 
 router = APIRouter(tags=["catalog"])
 
 
+def get_catalog(request: Request) -> CatalogService:
+    return request.app.state.catalog
+
+
+def cached_json(result: CacheResult) -> JSONResponse:
+    # The cached value is already plain JSON data, so we skip re-validating it
+    # through Pydantic on every hit (that would waste the CPU the cache saved).
+    return JSONResponse(content=result.value, headers={"X-Cache": result.status})
+
+
 @router.get("/categories", response_model=list[CategoryOut])
-async def list_categories(session: AsyncSession = Depends(get_session)):
-    return await repository.list_categories(session)
+async def list_categories(catalog: CatalogService = Depends(get_catalog)):
+    return cached_json(await catalog.categories())
 
 
 @router.get("/products", response_model=SearchResponse)
 async def search_products(
-    params: SearchParams = Depends(get_search_params), session: AsyncSession = Depends(get_session)
+    params: SearchParams = Depends(get_search_params), catalog: CatalogService = Depends(get_catalog)
 ):
-    items, has_more = await repository.search_products(session, params)
-    return SearchResponse(items=items, page=params.page, page_size=params.page_size, has_more=has_more)
+    return cached_json(await catalog.search(params))
 
 
 @router.get("/products/{product_id}", response_model=ProductDetail)
-async def get_product(product_id: int, session: AsyncSession = Depends(get_session)):
-    product = await repository.get_product(session, product_id)
-    if product is None:
-        raise HTTPException(status_code=404, detail="product not found")
-    return product
+async def get_product(product_id: int, catalog: CatalogService = Depends(get_catalog)):
+    result = await catalog.product_detail(product_id)
+    if result.value is None:
+        raise HTTPException(status_code=404, detail="product not found", headers={"X-Cache": result.status})
+    return cached_json(result)
