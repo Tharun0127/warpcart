@@ -50,17 +50,35 @@ class FailingRedis:
         raise RedisConnectionError("connection refused")
 
 
-async def test_circuit_breaker_stops_calling_redis_after_a_failure():
+async def test_circuit_breaker_stops_calling_redis_after_repeated_failures():
     redis = FailingRedis()
-    store = CacheStore(redis, retry_after_seconds=60)
+    store = CacheStore(redis, retry_after_seconds=60, failure_threshold=3)
     for _ in range(10):
         try:
             await store.get_json("any")
         except CacheUnavailable:
             pass
-    # Only the first call reached Redis; the rest were skipped instantly
+    # Only the first 3 calls reached Redis; the rest were skipped instantly
     # instead of each waiting for a connection timeout.
-    assert redis.calls == 1
+    assert redis.calls == 3
+
+
+async def test_a_single_failure_does_not_open_the_breaker():
+    class FlakyRedis(FailingRedis):
+        async def get(self, key):
+            self.calls += 1
+            if self.calls == 1:
+                raise RedisConnectionError("blip")
+            return None
+
+    redis = FlakyRedis()
+    store = CacheStore(redis, retry_after_seconds=60, failure_threshold=3)
+    try:
+        await store.get_json("any")
+    except CacheUnavailable:
+        pass
+    assert await store.get_json("any") is None  # second call went to Redis again
+    assert redis.calls == 2
 
 
 async def test_circuit_breaker_retries_after_the_cooldown():

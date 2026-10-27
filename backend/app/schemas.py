@@ -77,6 +77,24 @@ class ProductUpdate(BaseModel):
         return self
 
 
+class EndpointMetrics(BaseModel):
+    endpoint: str
+    requests: int
+    hits: int
+    misses: int
+    bypassed: int
+    degraded: int
+    hit_ratio: float | None
+    avg_latency_ms: float | None
+
+
+class CacheMetricsOut(BaseModel):
+    cache_enabled: bool
+    stampede_strategy: str
+    redis_available: bool
+    endpoints: list[EndpointMetrics]
+
+
 class LoginRequest(BaseModel):
     username: str
     password: str

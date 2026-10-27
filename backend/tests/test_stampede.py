@@ -31,7 +31,10 @@ async def fire(client, path: str, n: int) -> list:
 
 
 async def test_lock_lets_only_one_of_500_requests_hit_the_database(client_factory, redis_client, count_db_loads):
-    client = await client_factory(stampede_strategy="lock")
+    # All 500 requests share ONE test process and event loop, which is much
+    # harsher than 4 real workers. A long max wait keeps a slow CI box from
+    # making waiters give up; the 2s production default is tested below.
+    client = await client_factory(stampede_strategy="lock", stampede_max_wait_ms=10_000)
     await client.get("/products/1")          # warm the key
     await redis_client.delete(product_key(1))  # the hot key "expires"
     count_db_loads["count"] = 0

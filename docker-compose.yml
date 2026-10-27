@@ -75,5 +75,13 @@ services:
       # First boot runs migrations and seeds 500k rows before the server starts.
       start_period: 600s
 
+  frontend:
+    build: ./frontend
+    container_name: warpcart-frontend
+    ports:
+      - "5171:80"
+    depends_on:
+      - api
+
 volumes:
   pgdata:

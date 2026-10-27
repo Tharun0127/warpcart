@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.cache.aside import CacheAside
+from app.cache.metrics import CacheMetrics
 from app.cache.store import CacheStore
 from app.config import Settings, get_settings
 from app.db import build_engine, build_session_factory
@@ -27,6 +28,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         app.state.settings = settings
         app.state.store = store
+        app.state.metrics = CacheMetrics(store)
         app.state.catalog = CatalogService(session_factory, CacheAside(store, settings), settings)
         yield
         await store.close()

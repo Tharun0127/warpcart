@@ -34,9 +34,13 @@ class CacheUnavailable(Exception):
 
 
 class CacheStore:
-    def __init__(self, redis: Redis, retry_after_seconds: float = 5.0):
+    def __init__(self, redis: Redis, retry_after_seconds: float = 5.0, failure_threshold: int = 3):
         self.redis = redis
         self.retry_after_seconds = retry_after_seconds
+        # One slow reply during a CPU spike is not an outage. Only several
+        # failures in a row open the breaker.
+        self.failure_threshold = failure_threshold
+        self._consecutive_failures = 0
         self._down_until = 0.0
 
     @classmethod
@@ -55,15 +59,25 @@ class CacheStore:
         try:
             result = await coro_factory()
         except (RedisError, OSError) as exc:
-            if self._down_until == 0.0:
-                logger.warning("Redis unavailable (%s); serving from Postgres for %.0fs",
-                               exc.__class__.__name__, self.retry_after_seconds)
-            self._down_until = time.monotonic() + self.retry_after_seconds
+            self._record_failure(exc)
             raise CacheUnavailable(str(exc)) from exc
+        self._record_success()
+        return result
+
+    def _record_failure(self, exc: Exception) -> None:
+        self._consecutive_failures += 1
+        if self._consecutive_failures < self.failure_threshold:
+            return
+        if self._down_until == 0.0:
+            logger.warning("Redis unavailable (%s); serving from Postgres for %.0fs",
+                           exc.__class__.__name__, self.retry_after_seconds)
+        self._down_until = time.monotonic() + self.retry_after_seconds
+
+    def _record_success(self) -> None:
         if self._down_until:
             logger.warning("Redis is reachable again; cache re-enabled")
-            self._down_until = 0.0
-        return result
+        self._consecutive_failures = 0
+        self._down_until = 0.0
 
     # --- values --------------------------------------------------------------
     async def get_json(self, key: str) -> Any | None:
@@ -92,6 +106,28 @@ class CacheStore:
                 return await pipe.execute()
 
         await self._call(run)
+
+    # --- counters (metrics) -------------------------------------------------
+    async def hincr_many(self, key: str, ints: dict[str, int], floats: dict[str, float]) -> None:
+        # One pipelined round trip instead of one per field.
+        async def run():
+            async with self.redis.pipeline(transaction=False) as pipe:
+                for field, amount in ints.items():
+                    pipe.hincrby(key, field, amount)
+                for field, amount in floats.items():
+                    pipe.hincrbyfloat(key, field, amount)
+                return await pipe.execute()
+
+        await self._call(run)
+
+    async def hgetall_many(self, keys: list[str]) -> list[dict[str, str]]:
+        async def run():
+            async with self.redis.pipeline(transaction=False) as pipe:
+                for key in keys:
+                    pipe.hgetall(key)
+                return await pipe.execute()
+
+        return await self._call(run)
 
     # --- locks ---------------------------------------------------------------
     async def acquire_lock(self, key: str, token: str, ttl_ms: int) -> bool:

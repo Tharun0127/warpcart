@@ -44,7 +44,9 @@ class Settings(BaseSettings):
     xfetch_beta: float = 1.0
 
     # Graceful degradation: give up on Redis quickly, then skip it for a while.
-    redis_timeout_seconds: float = 0.25
+    # 1s, not lower: under a burst the event loop itself can delay reading a
+    # Redis reply by a few hundred ms, and that must not look like "Redis down".
+    redis_timeout_seconds: float = 1.0
     redis_retry_after_seconds: float = 5.0
 
     # Connection pool per worker process

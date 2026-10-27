@@ -58,4 +58,6 @@ async def test_cache_disabled_bypasses_redis_entirely(client_factory, redis_clie
     first = await client.get("/products/1")
     second = await client.get("/products/1")
     assert first.headers["X-Cache"] == second.headers["X-Cache"] == "BYPASS"
-    assert await redis_client.dbsize() == 0
+    # Only metrics counters are written; nothing is cached.
+    stored = [k async for k in redis_client.scan_iter(match="*")]
+    assert stored and all(k.startswith("wc:v1:metrics:") for k in stored)

@@ -119,10 +119,28 @@ Covered under "TTL strategy": it prevents many different keys expiring together,
 
 ### Redis errors become "go to Postgres", never a 500
 - **Chosen:** `CacheStore` converts every Redis error into `CacheUnavailable`; `CacheAside` catches it and calls the loader directly. Response header `X-Cache: DEGRADED`. A warning is logged.
-- **Short timeouts (250 ms):** a cache that takes seconds to answer is worse than no cache.
-- **Tiny circuit breaker:** after one failure, Redis is skipped for 5 s. Without it, every request would pay the connection timeout while Redis is down. Logs one warning when it goes down and one when it recovers, not one per request.
+- **Short timeouts (1 s):** a cache that takes seconds to answer is worse than no cache. We first used 250 ms, but the 500-request stampede test showed that a busy event loop can delay *reading* a Redis reply by a few hundred ms. That tripped the breaker and sent 70 requests to Postgres, the exact stampede we were preventing. 1 s fails over fast enough without false alarms.
+- **Tiny circuit breaker:** after 3 consecutive failures, Redis is skipped for 5 s. (One failure was our first threshold. A single slow reply during a CPU spike then turned off the cache for 5 s. That was a flaky test, and a real outage risk.) Without it, every request would pay the connection timeout while Redis is down. Logs one warning when it goes down and one when it recovers, not one per request.
 - **Writes when Redis is down:** the Postgres update still succeeds and returns 200. Invalidation is skipped with a warning. Since Redis runs without persistence, a restarted Redis is empty anyway; in a network partition, stale entries are bounded by their TTL.
 - **Risk we accept:** when Redis is down, all traffic hits Postgres. The baseline benchmark shows Postgres alone handles the load (with higher latency). In production you would add rate limiting or a connection-pool cap; out of scope here.
+
+## Metrics
+
+### Redis hashes per endpoint, updated with HINCRBY in one pipeline
+- **Chosen:** `wc:v1:metrics:<endpoint>` hash with `requests`, `HIT`, `MISS`, `BYPASS`, `DEGRADED`, `latency_ms_total`. Hit ratio and average latency are computed when `GET /metrics/cache` is read.
+- **Alternatives:** in-process counters (wrong with 4 workers: each would see a quarter of the traffic); Prometheus client + Grafana (the right production answer, but the spec asks for Redis counters and a small dashboard).
+- **Why sums, not averages:** storing a running total and a count lets every worker add atomically. Storing an average would need read-modify-write and lose updates under concurrency.
+- **Hit ratio = hits / (hits + misses):** BYPASS and DEGRADED requests never asked the cache, so including them would make the ratio meaningless when the cache is off.
+- **Latency is measured inside the handler** (cache lookup + DB on miss), not including HTTP overhead. Locust measures end-to-end latency; the two together show where the time goes.
+- **Metrics still count when `CACHE_ENABLED=false`** (as BYPASS), so the cache-off benchmark has comparable latency numbers. That costs one Redis round trip per request in both modes, so the comparison stays fair.
+- **No metric TTL:** `volatile-lru` therefore never evicts them. No reset endpoint either (not in the spec); the benchmark runner deletes the known keys directly.
+
+## Frontend
+
+- **nginx serves the built app and proxies `/api` to FastAPI:** one origin, so no CORS configuration. Vite's dev server does the same proxying for `npm run dev`.
+- **React Query `staleTime` is only 5 s:** the point of the UI is to show the server cache (HIT/MISS badges come from the `X-Cache` header); a long browser cache would hide it.
+- **Debounce (300 ms) on the whole filter object, infinite scroll with IntersectionObserver** and `useInfiniteQuery` using the API's `has_more` flag.
+- **Metrics page polls every 2 s** so the numbers move live during a Locust run.
 
 ### Redis configuration: no persistence, `volatile-lru`, 256 MB
 - **Why:** it is a cache; losing it on restart is fine, and persistence costs I/O. `volatile-lru` only evicts keys with a TTL, so cache entries get evicted under memory pressure but TTL-less bookkeeping keys (like search version counters) never are.
