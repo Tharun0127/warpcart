@@ -41,8 +41,12 @@ class CatalogService:
             response = SearchResponse(items=items, page=params.page, page_size=params.page_size, has_more=has_more)
             return response.model_dump(mode="json")
 
+        # Read the scope's version BEFORE loading. If an update bumps it while
+        # we query Postgres, we still write under the old version, so a
+        # possibly-stale result lands in a key nobody will read again.
+        version = await self.cache.search_version(keys.search_scope(params))
         return await self.cache.get_or_load(
-            keys.search_key(params), load, ttl_seconds=self.settings.ttl_search_seconds
+            keys.search_key(params, version), load, ttl_seconds=self.settings.ttl_search_seconds
         )
 
     async def categories(self) -> CacheResult:
@@ -57,4 +61,9 @@ class CatalogService:
     async def update_product(self, product_id: int, price: Decimal | None, stock: int | None) -> dict | None:
         async with self.session_factory() as session:
             product = await repository.update_product(session, product_id, price=price, stock=stock)
-        return product.model_dump(mode="json") if product else None
+        if product is None:
+            return None
+        # The session block above has committed, so invalidating now cannot
+        # race with our own uncommitted write.
+        await self.cache.invalidate_product(product.id, product.category_slug)
+        return product.model_dump(mode="json")

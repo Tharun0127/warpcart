@@ -3,7 +3,7 @@ import random
 from decimal import Decimal
 
 from app.cache.aside import ttl_with_jitter
-from app.cache.keys import hash_search_params, product_key, search_key
+from app.cache.keys import hash_search_params, product_key, search_key, search_scope
 from app.schemas import SearchParams
 
 
@@ -51,7 +51,22 @@ def test_key_has_fixed_length_whatever_the_input():
 
 def test_search_key_is_deterministic_across_calls():
     params = SearchParams(q="watch", page=3)
-    assert search_key(params) == search_key(params)
+    assert search_key(params, 7) == search_key(params, 7)
+
+
+def test_search_key_contains_scope_and_version():
+    key = search_key(SearchParams(q="watch", category="Watches"), 4)
+    assert key.startswith("wc:v1:search:watches:4:")
+
+
+def test_search_without_category_uses_the_all_scope():
+    assert search_scope(SearchParams(q="watch")) == "all"
+    assert search_key(SearchParams(q="watch"), 0).startswith("wc:v1:search:all:0:")
+
+
+def test_bumping_the_version_changes_the_key():
+    params = SearchParams(q="watch", category="watches")
+    assert search_key(params, 1) != search_key(params, 2)
 
 
 def test_ttl_jitter_stays_within_ratio_and_varies():

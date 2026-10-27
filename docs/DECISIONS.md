@@ -76,6 +76,26 @@ All TTLs get **±10% random jitter** so keys written together in a burst do not 
 ### `CACHE_ENABLED` flag
 - **Why:** the benchmarks compare the same build with and without caching. With the flag off, Redis is never called (status `BYPASS`).
 
+## Invalidation
+
+### Delete the product key, version the search keys
+- **Chosen:** on update, `DEL wc:v1:product:<id>` and `INCR wc:v1:searchver:<category>` + `INCR wc:v1:searchver:all`, in one MULTI/EXEC. Search keys look like `wc:v1:search:<scope>:<version>:<hash>`.
+- **Alternatives:**
+  - `KEYS wc:v1:search:*` and delete matches: O(n) and blocks Redis; banned by the spec.
+  - `SCAN` + delete: non-blocking but still O(n) per update, and slow with many keys.
+  - A Redis SET per category listing its search keys: works, but the set must be maintained on every write and can drift from reality when keys expire.
+  - Only rely on TTL: simplest, but users see a wrong price for up to 60 s.
+- **Why:** versioning is O(1) per update no matter how many search keys exist. Orphaned old-version keys are never read again and expire by their 60 s TTL, so memory cleans itself.
+- **Cost:** one extra Redis `GET` per search to read the version. Cheap (sub-millisecond) compared to a search query.
+
+### Why searches without a category get their own "all" scope
+A search with no category filter can contain a product from any category. Bumping the "all" scope on every update keeps those correct. The trade-off is that "all" searches are invalidated more often than category searches; under the benchmark's 5% write rate this is acceptable and is visible in the hit ratio.
+
+### Invalidate after commit, and read the version before loading
+- Invalidating before the transaction commits would let a concurrent reader re-cache the old row.
+- A search reads its version **before** querying Postgres. If an update lands mid-query, the reader writes under the old version, which is already unreachable. So the classic "stale write after invalidation" race cannot poison search keys.
+- The product detail key still has that race in theory (reader loads old row → admin commits and deletes → reader writes old row). The window is a few milliseconds and the 300 s TTL bounds the damage. A fix would be a delayed second delete or a per-product version; we documented it instead of adding complexity (see INTERVIEW.md).
+
 ### Redis configuration: no persistence, `volatile-lru`, 256 MB
 - **Why:** it is a cache; losing it on restart is fine, and persistence costs I/O. `volatile-lru` only evicts keys with a TTL, so cache entries get evicted under memory pressure but TTL-less bookkeeping keys (like search version counters) never are.
 

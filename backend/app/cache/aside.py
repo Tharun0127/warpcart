@@ -14,6 +14,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
+from app.cache import invalidation, keys
 from app.cache.store import CacheStore
 from app.config import Settings
 
@@ -42,6 +43,16 @@ class CacheAside:
     def __init__(self, store: CacheStore, settings: Settings):
         self.store = store
         self.settings = settings
+
+    async def search_version(self, scope: str) -> int:
+        if not self.settings.cache_enabled:
+            return 0
+        return await self.store.get_int(keys.search_version_key(scope))
+
+    async def invalidate_product(self, product_id: int, category_slug: str) -> None:
+        if not self.settings.cache_enabled:
+            return
+        await invalidation.invalidate_product(self.store, product_id, category_slug)
 
     async def get_or_load(
         self,

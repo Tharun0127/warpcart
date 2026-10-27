@@ -65,5 +65,25 @@ def hash_search_params(params: SearchParams) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
 
 
-def search_key(params: SearchParams) -> str:
-    return _key("search", hash_search_params(params))
+# Searches with no category filter can contain products from every category,
+# so they live in their own scope that every product update bumps.
+ALL_CATEGORIES_SCOPE = "all"
+
+
+def search_scope(params: SearchParams) -> str:
+    """Which version counter a search belongs to: its category, or "all"."""
+    return normalize_search_params(params)["category"] or ALL_CATEGORIES_SCOPE
+
+
+def search_version_key(scope: str) -> str:
+    return _key("searchver", scope)
+
+
+def search_key(params: SearchParams, version: int) -> str:
+    """Search key that includes the current version of its scope.
+
+    Bumping the version (INCR) changes every future key in that scope, so old
+    entries are never read again and simply expire by TTL. That gives us
+    "invalidate all searches in category X" in O(1), without KEYS or SCAN.
+    """
+    return _key("search", search_scope(params), version, hash_search_params(params))

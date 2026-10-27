@@ -23,5 +23,18 @@ class CacheStore:
     async def delete(self, *keys: str) -> None:
         await self.redis.delete(*keys)
 
+    async def get_int(self, key: str) -> int:
+        raw = await self.redis.get(key)
+        return int(raw) if raw is not None else 0
+
+    async def delete_and_incr(self, delete_keys: list[str], incr_keys: list[str]) -> None:
+        # MULTI/EXEC so the delete and the version bumps happen together in
+        # one round trip; no reader sees "product deleted, searches not yet".
+        async with self.redis.pipeline(transaction=True) as pipe:
+            pipe.delete(*delete_keys)
+            for key in incr_keys:
+                pipe.incr(key)
+            await pipe.execute()
+
     async def close(self) -> None:
         await self.redis.aclose()
