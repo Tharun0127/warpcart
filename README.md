@@ -5,6 +5,15 @@ Cache-aside with Redis, deterministic keys, per-type TTLs, O(1) invalidation wit
 versioned namespaces, stampede protection (Redis lock and XFetch), graceful
 degradation when Redis dies, and live cache metrics. Every claim is measured.
 
+## What this project demonstrates
+
+- **Measure first, then cache.** I built the uncached API first, used `EXPLAIN ANALYZE` to find the slow query, and fixed it with a pg_trgm index (160 ms → 12 ms) before adding Redis. The cache then cut p50 latency from 65 → 35 ms and raised throughput by 52%.
+- **Invalidation without `KEYS`.** Per-category version counters make "invalidate every cached search for this category" a single O(1) `INCR`.
+- **Stampede protection, proven against the database.** 500 concurrent requests on an expired hot key produce exactly **1** query, counted by Postgres's own `pg_stat_statements`. A second strategy (XFetch probabilistic early expiration) sits behind a flag.
+- **Failure handling.** With Redis down, the API keeps serving from Postgres, behind a small circuit breaker. A test proves it, and so does `docker compose stop redis` on the live stack.
+- **Honest engineering notes.** The docs record what went wrong and how I found it: a 250 ms Redis timeout that caused the very stampede it should prevent, a load generator that was the real bottleneck, and why search hit ratio collapses under heavy writes.
+- **66 tests** against real Postgres and Redis, plus `DECISIONS.md` covering every trade-off.
+
 ## Results
 
 Locust, 50 concurrent users, 60 s, 80% product reads / 15% search / 5% admin writes, cold cache at start.
