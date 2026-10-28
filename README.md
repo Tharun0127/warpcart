@@ -32,6 +32,15 @@ Locust, 50 concurrent users, 60 s, 80% product reads / 15% search / 5% admin wri
 
 Details, caveats and raw CSVs: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
+
+## Screenshots
+
+| Search (debounced, filters, infinite scroll) | Product detail | Live cache metrics |
+|---|---|---|
+| ![Search](docs/screenshots/search.png) | ![Product](docs/screenshots/product.png) | ![Cache metrics](docs/screenshots/cache-metrics.png) |
+
+Every response shows its `X-Cache` status (HIT / MISS / BYPASS / DEGRADED); the metrics page polls `GET /metrics/cache` every 2 s.
+
 ## Architecture
 
 ```mermaid
